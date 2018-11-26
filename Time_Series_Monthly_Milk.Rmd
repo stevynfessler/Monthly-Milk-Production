@@ -1,0 +1,779 @@
+---
+title: "Cow Milk Production Time Series"
+author: 'Gamma: Stevyn Fessler, Sarah Franzen, Christopher Tsoi, Jianan Zhou'
+date: "March 9, 2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+
+
+```{r, echo=FALSE}
+# Data steps:
+# 
+#   Transform:
+#     a. Box-Cox
+#     b. Log
+#     c. Square root
+# 
+# 
+# 
+#   Differencing:
+#     a. Seasonality
+#     b. Trend
+#   
+#     check acf, pacf, plots and variance
+# 
+# 
+# 
+# 
+#   
+# Model Fitting:
+#   a. Pure ar(p) using Yule-Walker
+#   b. Pure ma(q) using MLE
+# 
+# Use loop to check the different models with arma(p,q)
+# 
+# Diagnostics
+# 
+# 
+# Forecasting
+```
+
+
+```{r reading in csv and load packages, echo=FALSE,warning=F, message=FALSE}
+
+setwd("C:/Users/estaf/Documents/Pstat 174/Final_Project_PS_174/")
+milk <-  read.csv(file = "monthly-milk-production-pounds-p.csv", header=TRUE)
+
+# in csv file manually delete footer cells at the bottom to make reading data as time series easier
+
+
+library(qpcR)
+library(forecast)
+
+#remove NA observation
+
+colnames(milk)[2] <- "Monthy.milk"
+
+
+```
+
+
+#Abstract
+
+
+In this project, we are analyzing a data set called "Monthly milk production: pounds per cow. Jan 62 - Dec 75" by Cryer(1986) on Time Series Data. Our analysis is done using R along with the qpcR and forecast packages. Our question for this project is: "Can we predict milk production of cows two years into the future?". We analyze the 14 year period of time series data by building a model on transformed and differenced data which we used to predict two years in to the future. First we use the square-root and Box-Cox transformations in attempt to normalize the data. This data is then differenced for seasonality and trend to make the data stationary for model fitting. We fitted AR(p) models using the Yule-Walker method. Then, we fitted ARMA(p,q) models by checking AIC. Finally, we fit a SARIMA model based on ACF and PACF plots of our transformed and differenced data. For all of our models we had trouble with normalizing our data and residuals as we were limited to techniques learned in this course only. Disregarding the problems with normality, our model predicts an appropriate forecast based on our original data. We are able to reproduce the upward trend and seasonality of our original data.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#Introduction:
+
+
+Originally, we were interested in food production due to the rapid change of the food industry within the past few generations. Animals are being bred, fed, and raised differently to produce more from each individual animal than ever before. According to estimates by the USDA, dairy farmers are producing almost three times as much milk today compared to 1960 with only half the number of cows. Although, our model cannot predict more than a few years into the future, we are confident that our model can accureately represent the trend of the data shown here by forecasting two years after 1975 based on our data.
+
+
+This data set contains 168 observations of monthly milk proudction of cows from Janauary 1962 to December 1975. We are trying to predict what the milk proudction would be beginning at year 1976 and ending at year 1978. First we transform the data using the square root transformation and the Box-Cox transformation. We then difference the data for seasonality and trend, checking that the variance of each resulting data set lowers each time. We then used the Yule-Walker method to estimate an AR model. After, we then fit ARMA models based on lowest AIC. Finally, we fit a SARIMA model based on PACF and ACF plots. Diagnostic checks are done using the Box-Pierce and Ljung-Box tests for independence as well as the Shapiro-Wilk test for normality. Due to issues with normality we selected a Box-Cox transformed SARIMA model. Based on the SARIMA model passing the most diagnostics checks, we use this to create a forecast that indicates the same trend and seasonality of our original data.
+
+
+
+
+
+
+
+```{r convert to time series object, echo=FALSE}
+
+# convert dataframe to time series object
+milk.ts <- ts(data=milk[,2], start=c(1962,1), frequency = 12)
+
+#Initial time series
+ts.plot(milk.ts, ylab="Pounds of milk per cow per month", main="Original Data", xlab="Year")
+
+
+```
+
+
+Upon observing the original time series data there is a clear linear trend as well as a seasonal component. This is to be expected as cows give more milk during the spring compared to other times of the year. There does not appear to be any heteroskedasticity in the original data despite the trend and seasonality. The variance appears not to change with time.
+
+
+
+
+
+```{r plot, acf and pacf, echo=FALSE}
+
+
+# add more lags to acf
+op <- par(mfrow = c(1,2))
+acf(milk.ts, lag.max = 60, main="")
+pacf(milk.ts, lag.max = 36, main="")
+title("ACF and PACF for Original Data", line = -1, outer=TRUE)
+par(op)
+```
+
+
+Observing the plot for ACF there is lots of action that spikes periodically every 12th lag indicating seasonality in MA components along with some AR degrees.
+
+
+Observing the PACF plot there is a spike at lag 3 indicating with some action before a large spike at lag 13 which indicates there is likely seasonality. Given that there are periodic spikes in the ACF and several spikes in the PACF there is likely a mix of MA(q) and AR(p) components in the model that generated these data.
+
+
+
+
+
+
+```{r transformations, echo=FALSE}
+
+# Original Data
+
+#log transform
+milk.log <- log(milk.ts)
+
+
+# box-cox transform
+milk.boxcox <- boxcox(milk.ts ~ as.numeric(1:length(milk.ts)))
+
+
+
+milk.lambda = milk.boxcox$x[which(milk.boxcox$y == max(milk.boxcox$y))]
+#milk.lambda
+
+milk.bct <- (1/milk.lambda)*(milk.ts^milk.lambda -1)
+
+
+
+# Box Cov gives lambda value close to 1/2, therefore use square root transform
+milk.sq <- sqrt(milk.ts)
+
+#compare transformation plots
+
+par(mfrow = c(2, 2))
+ts.plot(milk.ts, main="Original", xlab="Year", ylab="Pounds of Milk per Cow")
+ts.plot(milk.log, main="Log", xlab="Year", ylab="Pounds of Milk per Cow")
+ts.plot(milk.sq, main="Square Root", xlab="Year", ylab="Pounds of Milk per Cow")
+ts.plot(milk.bct, main="Box-Cox", xlab="Year", ylab="Pounds of Milk per Cow")
+par(op)
+
+
+```
+Before we difference the data we test transformations on our original data. Beginning with the Box-Cox transformation we find the estimated MLE lambda which maximizes the normality of the data is 0.4646. This lambda is close to 0.5 and 0.5 is also contained in the 95% confidence interval for our estimated MLE, therefore we will transform the data using the square root transformation by taking the square root of each observation. We also test the log transform of our data, but based on the value of lambda from our Box-Cox transformation we conclude that the square root is a better transformation.
+
+
+
+```{r differencing square root, echo=FALSE}
+#ts.plot(milk.sq)
+#var(milk.sq)
+#acf(milk.sq, xlim=c(0,2.5))
+#pacf(milk.sq, xlim=c(0,2.5))
+
+
+# difference for seasonality
+milk.diff1.sq <- diff(milk.sq,lag=12, differences=1)
+
+ts.plot(milk.diff1.sq, main="Deseasonalized", ylab = "", xlab = "Year")
+#var(milk.diff1.sq)
+#acf(milk.diff1.sq, xlim=c(0,2.5), main="Deseasonalized")
+#pacf(milk.diff1.sq, xlim=c(0,2.5), main="Deseasonalized")
+```
+
+
+After we transformed our original time series data with the square root transformation, we then difference the data to remove any possible seasonality and trend so we can build models based on stationary data. To determine whether or not differencing the data is reasonable we checked the variance of the data before and after differencing. Our square root transformed data started with a variance of 3.499. Upon differencing for seasonality first by differencing at lag 12, due to our data being monthly, the data has a lower variance of 0.0928. We can also observe the plot of the new data with seasonality removed, the plot begins to somewhat resemble white noise.
+
+
+```{r trend square root difference, echo=F}
+# difference for trend
+milk.diff2.sq <- diff(milk.diff1.sq, differences=1)
+
+ts.plot(milk.diff2.sq, main="De-seasonalized/trended", ylab = "" ,xlab="Year")
+
+```
+
+
+Upon differencing again for trend, by differencing at lag 1, we observe another drop in variance to 0.0280. This indicates that the differencing is valid to make the data more stationary. Upon observing the plot of this detrended data it looks mostly stationary and similar to a white noise process.
+
+We difference once more for trend and the variance increases to 0.0684 from 0.0280. This is not a valid difference to make the data more stationary.
+
+
+
+```{r, echo=FALSE}
+#var(milk.diff2.sq)
+par(mfrow = c(1, 2))
+acf(milk.diff2.sq, xlim=c(0,2.5), main="")
+pacf(milk.diff2.sq, xlim=c(0,2.5), main="")
+title("De-trended/seasonalized", line = -1, outer=TRUE)
+par(op)
+
+milk.diff3.sq <- diff(milk.diff2.sq, differences=1)
+
+#var(milk.diff3.sq)
+# variance gets smaller each difference
+
+
+# final data for square root transform
+milk.sqf <- milk.diff2.sq
+
+```
+
+The data we will use to make models will be square root transformed, then differenced for seasonality and finally differenced once for trend. Observing the PACF we noticed a spike at lag 1 indicating a possibe AR(p) of order 1. There is also a significant spike at lag 12 indicating a possible seasonal AR(P) of order 1. Upon observing the ACF plot we notice a spike at lag 1 indicating a possible MA(q) component of order 1. Another spike is observed at lag 12 indicating a possible seasonal MA(Q) component of order 1. The lag spikes once again at lag 13, this is likely due to seasonality in the process generating the ACF. The small spikes every 12 lags starting at lag 1 are insignificant after this point. In general, the spikes in lag in the ACF and PACF indicate a mixed ARMA model with a possible SARIMA model.
+
+
+For now we will try fitting models using Yule-Walker on a pure AR(p) model and fitting ARMA models of smaller order than the resulting p.
+
+
+
+```{r model fitting for square root, echo=FALSE}
+
+fit.ar.sq <- ar(milk.sqf, method="yule-walker")
+fit.ar.sq
+
+
+
+#plot(residuals(fit.ar.sq))
+
+#Box.test(residuals(fit.ar.sq),lag=13,type="Box-Pierce", fitdf=12)
+
+#shapiro.test(residuals(fit.ar.sq))
+```
+
+This model for AR(12) does not make sense, the degree is too high in complexity for a model to be reasonable. This is likely due to a seasonal lag in pacf for the data. This was shown to tail off previously upon observing the transformed data.
+
+This AR(12) model fails the Box-Pierce test for independence of residuals with a p-value of 0.0395, which is less than 0.05. Given this p-value we reject the null hypothesis of the test stating that the residuals are independent. The residuals for this model are serially correlated. 
+
+This model also fails the Shapiro-Wilk test for normality of residuals with a p-value of 0.0006, which is much less than 0.05. The null hypothesis of the test assumes normality of residuals. With a p-value less than 0.05 we reject the null hypothesis and conclude the residuals are not normal. Given the failure of the assumptions that the model produces normal and independent residuals, it is not usable for forecasting.
+
+
+We will now check ARMA models up to degree 5 for both p and q to test AIC and find the ideal model.
+
+```{r model fitting loop square root, include=FALSE, message=FALSE, warning=FALSE}
+
+
+library(qpcR)
+
+# Calculate AICc for ARMA models with p and q running from 0 to 5
+aiccs.milk.sq <- matrix(NA, nr = 6, nc = 6)
+dimnames(aiccs.milk.sq) = list(p=0:5, q=0:5)
+
+
+
+# loop for aic matrix
+for(p in 0:5)
+{
+  for(q in 0:5)
+  {
+    aiccs.milk.sq[p+1,q+1] = AICc(arima(milk.sqf, order = c(p,0,q),method = "ML"))
+  }
+}
+aiccs.milk.sq
+(aiccs.milk.sq==min(aiccs.milk.sq))
+
+# The lowest AIC model is arma(3,3)
+# -128.35 = AIC
+```
+
+```{r, echo=FALSE}
+fit.arma.sq.3.3 <- arima(milk.sqf, order = c(3,0,3), method = "ML")
+fit.arma.sq.3.3
+```
+
+By running a for loop to test AICs of ARMA(p,q) models on our square transformed, deseasonalized and detrended data, we obtain the best model as an ARMA(3,3) model with an AIC of about -129.11,the lowest AIC of all models tested. We will conduct further tests to determine whether the model is valid for forecasting.
+
+
+
+
+Similar to the tests done before on our AR(12) model, we test the normality and independence of the residuals from our model.
+
+
+```{r diagnostics check for square root differenced data, echo=FALSE}
+
+#Shapiro-Wilk test for normality of errors
+shapiro.test(residuals(fit.arma.sq.3.3))
+par(mfrow = c(1,2))
+hist(residuals(fit.arma.sq.3.3), breaks = 14, main="Residuals of ARMA(3,3)",xlab="Residuals")
+
+# Box Tests for serial correlation test of errors
+Box.test(residuals(fit.arma.sq.3.3), lag = 12 , type = "Box-Pierce", fitdf = 4)
+Box.test(residuals(fit.arma.sq.3.3), lag = 13, type = "Ljung-Box", fitdf = 4)
+
+qqnorm(residuals(fit.arma.sq.3.3),main = "Normal Q-Q ARMA(3,3)")
+qqline(residuals(fit.arma.sq.3.3))
+par(op)
+
+
+```
+
+
+Our model of ARMA(3,3) for our square transformed and differenced data fails tests of normality and independence of residuals. Observing the histogram of our residuals we see a slight right-tail in the data giving a slight skew to the data, thus there is a problem with normality. The QQ-normal plot also shows residuals that do not fall along the same line, also indicating a problem with normality. Given that this model fails all tests for normality and independence of residuals, we cannot proceed with forecasting given that we do not assumptions needed to make a proper forecast.
+
+We will fit another model using Box-Cox transformation as a more precise transformation for normality is likely needed. Rounding the given lambda for our Box-Cox transformation may not be enough to transform the data to be more normal. We will try again using the exact lambda of 0.4646 to maximize the normality of our transformed data.
+
+
+
+
+
+```{r differencing box cox transform, echo=FALSE}
+# Check variance at every difference
+var(milk.bct)
+
+# difference for seasonality
+milk.diff1.bct <- diff(milk.bct,lag=12,1)
+var(milk.diff1.bct)
+par(mfrow = c(1,2))
+acf(milk.diff1.bct, main="")
+pacf(milk.diff1.bct, main="")
+title("Deseasonalized", line = -1, outer=TRUE)
+par(op)
+
+# add difference for trend
+milk.diff2.bct <- diff(milk.diff1.bct,1)
+#var(milk.diff2.bct)
+
+
+par(mfrow = c(1,2))
+acf(milk.diff2.bct, lag.max = 100, main="")
+pacf(milk.diff2.bct, lag.max = 100, main="")
+title("De-seasonalized/trended", line = -1, outer=TRUE)
+par(op)
+
+
+# check difference for trend again
+milk.diff3.bct <- diff(milk.diff2.bct,1)
+#var(milk.diff3.bct)
+
+
+ts.plot(milk.diff1.bct, main = "Deasonalized", ylab="",xlab="Year")
+ts.plot(milk.diff2.bct, main = "De-seasonalized/trended", ylab="",xlab="Year")
+
+```
+
+
+We take our Box-Cox transformed data and try to difference it to remove any seasonality and trend that may be present before we build any models. Our transformed data starts out with variance of 8.769 and falls to 0.233 upon differencing for seasonality. We then difference once again for trend, and the variance drops again to 0.0706. We try differencing a third time and note the increase in variance to 0.1721. The smallest variance is given by the deseasonalized and once detrended data.
+
+
+
+First we will try to fit a mixed ARMA(p,q) model based on the order pure AR(p) model selected using the Yule-Walker method.
+
+
+```{r fit model for box cox transform differenced, echo=FALSE}
+
+# box cox transform yule walker model
+fit.bct.yw <- ar(milk.diff2.bct, method="yule-walker")
+fit.bct.yw
+plot(residuals(fit.bct.yw))
+
+
+shapiro.test(residuals(fit.bct.yw))
+
+Box.test(residuals(fit.bct.yw), lag=13, type="Box-Pierce", fitdf = 12)
+
+hist(residuals(fit.bct.yw), breaks = 15)
+```
+Similar to our other pure AR(12) model from the square transformed data, we have a high order AR model which does not make sense. It is not ideal to have a model with 12 predictors. This AR(12) model also fails the Shapiro-Wilk test for normality as well as the Box-Pierce test for independence. We will try to fit a mixed ARMA(p,q) model on our Box-Cox transformed and differenced data.
+
+
+
+
+
+```{r model fitting loop for box cox, include=FALSE}
+
+
+library(qpcR)
+
+
+
+
+# Calculate AICc for ARMA models with p and q running from 0 to 5
+aiccs.bct.milk.s <- matrix(NA, nr = 6, nc = 6)
+dimnames(aiccs.bct.milk.s) = list(p=0:5, q=0:5)
+
+for(p in 0:5)
+{
+  for(q in 0:5)
+  {
+    aiccs.bct.milk.s[p+1,q+1] = AICc(arima(milk.diff2.bct, order = c(p,0,q),method = "ML"))
+  }
+}
+aiccs.bct.milk.s
+(aiccs.bct.milk.s==min(aiccs.bct.milk.s))
+
+fit.bct.3.12 <- arima(milk.diff2.bct, order = c(12, 0, 3), method = "ML", xreg=1 : length(milk.diff2.bct))
+
+fit.bct.3.3 <- arima(milk.diff2.bct, order = c(3,0,3), method = "ML", xreg=1 : length(milk.diff2.bct))
+
+
+# aic 15.44
+fit.bct.3.3
+
+qqnorm(residuals(fit.bct.3.3))
+hist(residuals(fit.bct.3.3))
+plot(residuals(fit.bct.3.3))
+shapiro.test(residuals(fit.bct.3.3))
+Box.test(residuals(fit.bct.3.3), lag = 12 , type = "Box-Pierce", fitdf = 4)
+
+
+```
+
+We run checks on all possible ARMA(p,q) models up to degree 5 to test for the model with the lowest AIC. We find that an ARMA(3,3) model has the lowest AIC with an AIC of 15.44. This model also fails the Box-Pierce and Shapiro-Wilk tests indicating problems with normality and independence. We will finally try to fit a SARIMA model as indicated before by observing the ACF and PACF plots of our Box-Cox transformed and differenced data.
+
+
+
+```{r box cox sarima plots for acf and pacf, echo=FALSE}
+
+par(mfrow = c(1,2))
+acf(milk.diff2.bct, lag.max = 100, main="")
+pacf(milk.diff2.bct, lag.max = 100, main="")
+title("ACF and PACF", line = -1, outer=TRUE)
+par(op)
+
+```
+
+
+To determine a possible SARIMA model we begin by observing the ACF of our data we notice a small spike at lag 1 indicating a possible MA(1) component in our model. There is also a spike in the ACF at lag 12 indicating a possible seasonal MA(1) component. Looking at the PACF we observe a small spike at lag 1 indicating a possible AR(1) component. We also observe spikes at every 12th lag that tail off as the lags go on. This indicates a possible seasonal AR(1) component. We fit a SARIMA(1,0,1)x(1,1,1) period 12 model onto our Box-Cox transformed data without differencing.
+
+
+
+
+
+
+```{r sarima fitting, echo=FALSE}
+
+
+fit.sarima.bct <- arima(milk.bct, order = c(1,0,1), seasonal = list(order = c(1,1,1), period = 12), method = "ML")
+
+
+summary(fit.sarima.bct)
+
+shapiro.test(residuals(fit.sarima.bct))
+Box.test(residuals(fit.sarima.bct), lag = 13, type="Box-Pierce", fitdf = 4)
+Box.test(residuals(fit.sarima.bct), lag = 13, type="Ljung-Box", fitdf = 4)
+Box.test( ((residuals(fit.sarima.bct))^2), lag=13, type="Ljung-Box", fitdf = 0)
+
+par(mfrow = c(1,2))
+acf(residuals(fit.sarima.bct), lag.max = 36, main="")
+pacf(residuals(fit.sarima.bct), lag.max = 36, main="")
+title("ACF and PACF for SARIMA Model", line = -1, outer=TRUE)
+par(op)
+```
+
+Our SARIMA(1,0,1)x(1,1,1)12 model has an AIC of -21.73. We use the Ljung-Box and Box-Pierce test on 9 degrees of freedom, resulting from our h lag degrees of freedom being about 13 and our fit degrees of freedom being 4. These tests check the independence of the residuals from our SARIMA model, they pass the tests with p-values of 0.422 for Box-Pierce and 0.3687 for Ljung-Box. Upon looking at the ACF to check for correlation we see no significant lag spikes indicating no serial correlation. Looking at the standardized residuals we observe some high spikes in residuals which may indicate issues with normality.
+
+```{r sarima diagnostics, echo=F}
+
+
+par(mfrow = c(1,2))
+qqnorm(residuals(fit.sarima.bct))
+qqline(residuals(fit.sarima.bct))
+
+hist(residuals(fit.sarima.bct), breaks = 15, main="SARIMA Residuals",xlab = "Resdiuals")
+par(op)
+
+0.04518
+```
+
+
+We move on and test the normality of residuals. Again we notice some problems with normality seen in the residuals plot having a right tail indicating skew, as well as the QQ-normal plot having some points falling off the line near the ends. To test we use the Shapiro-Wilk test and get a p-value of 0.000416, which is less than 0.05 indicating problems with normality. Although there are some issues with normality with some right-skew, this model is able to pass tests for independent residuals, therefore this is the best model to use for forecasting.
+
+$Y_{t}$ = 0.99424$Y_{t-1}$-0.0555$Y_{t-12}$-0.0551781$Y_{t-13}$+$Z_{t}$-0.1899$Z_{t-1}$-0.6102$Z_{t-12}$+0.11587698$Z_{t-13}$ , $Z_t$ ~ $N(0,1)$
+
+
+#Forecasting
+
+
+```{r forecasting, echo=FALSE}
+
+library(forecast)
+# Predict 10 future observations and plot
+pred.bct <- predict(fit.sarima.bct, n.ahead=24)
+#ts.plot(milk.ts, xlim=c(1962,1981))
+
+
+#milk.forecast <- forecast(fit.sarima.bct)
+#plot(milk.forecast)
+
+
+#fit.sarima.bct 
+#pred.bct
+
+
+plot(1:length(milk.ts), milk.ts, main = "Monthly Milk per cow", ylab = "Milk in pounds per cow", xlab = "Date in Years", type = "l", xaxt = "null", xlim = c(130,193), ylim = c(750,1050))
+points( (length(milk.ts)+1):(length(milk.ts)+24), ((milk.lambda*pred.bct$pred+1)^(1/milk.lambda)))
+
+
+lines((length(milk.ts)+1):(length(milk.ts)+24),((milk.lambda*pred.bct$pred+1)^(1/milk.lambda) + 1.96*(milk.lambda*pred.bct$se+1)^(1/milk.lambda)),lty=2)
+
+lines((length(milk.ts)+1):(length(milk.ts)+24),((milk.lambda*pred.bct$pred+1)^(1/milk.lambda) - 1.96*(milk.lambda*pred.bct$se+1)^(1/milk.lambda)),lty=2)
+
+#axis(side = 1, as.Date(seq(from = as.Date("1962-01-01"), to = as.Date("1977-12-31"), by = "month")))
+```
+
+Here we forecast with our SARIMA model to predict 2 years ahead into the future. The point indicate our mean prediction, while the dashed lines indicated the lower and upper bounds for our prediction on a 95% confidence interval. Our bounds for error on our confidence interval are relatively small indicating relatively accurate model for our data.
+
+
+#Conclusion
+
+$Y_{t}$ = 0.99424$Y_{t-1}$-0.0555$Y_{t-12}$-0.0551781$Y_{t-13}$+$Z_{t}$-0.1899$Z_{t-1}$-0.6102$Z_{t-12}$+0.11587698$Z_{t-13}$ , $Z_t$ ~ $N(0,1)$ 
+
+Throughout the project we had the most trouble getting models to pass the Shapiro-Wilk test for normality. Maybe some other techniques outside the scope of this class could help us normalize our residuals. Although we had problems with normality of residuals in our model, we were successfully able to predict with relatively high certainty the production of milk for cows. Because our data is more than 40 years old, it is hard to predict trends of milk production for cows today. Our model does however reflect the general upward trend and seasonality of our original data.
+
+Our TA Aaron Zhou was extremely helpful with any question we had. He would give suggestions on R code as well as insight to the proper analysis based on whatever findings we had at the time. He also had lots of flexibility in office hours.
+
+Our professor Sudeep Bapat was also helpful. He was useful in giving guidelines to the proper order of steps and analysis to create proper time series model. His office hours were also flexible.
+
+#References
+
+https://www.uaex.edu/4h-youth/activities-programs/docs/Dairy%20Facts.pdf
+
+https://datamarket.com/data/set/22ox/monthly-milk-production-pounds-per-cow-jan-62-dec-75#!ds=22ox&display=line
+
+
+#Appendix
+
+```{r, eval=FALSE}
+setwd("C:/Users/estaf/Documents/Pstat 174/Final_Project_PS_174/")
+milk <-  read.csv(file = "monthly-milk-production-pounds-p.csv", header=TRUE)
+
+colnames(milk)[2] <- "Monthy.milk"
+
+# convert dataframe to time series object
+milk.ts <- ts(data=milk[,2], start=c(1962,1), frequency = 12)
+
+#Initial time series, acf and pacf plots
+ts.plot(milk.ts, ylab="Pounds of milk per cow per month", main="Original Data")
+
+# add more lags to acf
+op <- par(mfrow = c(1,2))
+acf(milk.ts, lag.max = 60, main="")
+pacf(milk.ts, lag.max = 36, main="")
+title("ACF and PACF for Original Data", line = -1, outer=TRUE)
+par(op)
+
+# Original Data
+
+#log transform
+milk.log <- log(milk.ts)
+
+# box-cox transform
+milk.boxcox <- boxcox(milk.ts ~ as.numeric(1:length(milk.ts)))
+
+milk.lambda = milk.boxcox$x[which(milk.boxcox$y == max(milk.boxcox$y))]
+milk.lambda
+
+milk.bct <- (1/milk.lambda)*(milk.ts^milk.lambda -1)
+
+# Box Cov gives lambda value close to 1/2, therefore use square root transform
+milk.sq <- sqrt(milk.ts)
+
+#compare transformation plots
+par(mfrow = c(2, 2))
+ts.plot(milk.ts, main="Original")
+ts.plot(milk.log, main="Log")
+ts.plot(milk.sq, main="Square Root")
+ts.plot(milk.bct, main="Box-Cox")
+par(op)
+
+ts.plot(milk.sq)
+var(milk.sq)
+acf(milk.sq, xlim=c(0,2.5))
+pacf(milk.sq, xlim=c(0,2.5))
+
+# difference for seasonality
+milk.diff1.sq <- diff(milk.sq,lag=12, differences=1)
+
+ts.plot(milk.diff1.sq, main="Deseasonalized")
+var(milk.diff1.sq)
+acf(milk.diff1.sq, xlim=c(0,2.5), main="Deseasonalized")
+pacf(milk.diff1.sq, xlim=c(0,2.5), main="Deseasonalized")
+
+# difference for trend
+milk.diff2.sq <- diff(milk.diff1.sq, differences=1)
+
+ts.plot(milk.diff2.sq, main="Detrended")
+
+var(milk.diff2.sq)
+par(mfrow = c(1, 2))
+acf(milk.diff2.sq, xlim=c(0,2.5), main="")
+pacf(milk.diff2.sq, xlim=c(0,2.5), main="")
+title("Detrended", line = -1, outer=TRUE)
+par(op)
+
+milk.diff3.sq <- diff(milk.diff2.sq, differences=1)
+
+var(milk.diff3.sq)
+# variance gets smaller each difference
+
+# final data for square root transform
+milk.sqf <- milk.diff2.sq
+
+fit.ar.sq <- ar(milk.sqf, method="yule-walker")
+fit.ar.sq
+
+plot(residuals(fit.ar.sq))
+
+Box.test(residuals(fit.ar.sq),lag=13,type="Box-Pierce", fitdf=12)
+
+shapiro.test(residuals(fit.ar.sq))
+
+
+# Calculate AICc for ARMA models with p and q running from 0 to 5
+aiccs.milk.sq <- matrix(NA, nr = 6, nc = 6)
+dimnames(aiccs.milk.sq) = list(p=0:5, q=0:5)
+
+
+# loop for aic matrix
+for(p in 0:5)
+{
+  for(q in 0:5)
+  {
+    aiccs.milk.sq[p+1,q+1] = AICc(arima(milk.sqf, order = c(p,0,q),
+                                        method = "ML"))
+  }
+}
+aiccs.milk.sq
+(aiccs.milk.sq==min(aiccs.milk.sq))
+
+# The lowest AIC model is arma(3,3)
+# -128.35 = AIC
+
+fit.arma.sq.3.3 <- arima(milk.sqf, order = c(3,0,3), method = "ML")
+fit.arma.sq.3.3
+
+#Shapiro-Wilk test for normality of errors
+shapiro.test(residuals(fit.arma.sq.3.3))
+par(mfrow = c(1,2))
+hist(residuals(fit.arma.sq.3.3), breaks = 14)
+
+# Box Tests for serial correlation test of errors
+Box.test(residuals(fit.arma.sq.3.3), lag = 12 , type = "Box-Pierce", fitdf = 4)
+Box.test(residuals(fit.arma.sq.3.3), lag = 13, type = "Ljung-Box", fitdf = 4)
+
+qqnorm(residuals(fit.arma.sq.3.3))
+qqline(residuals(fit.arma.sq.3.3))
+par(op)
+
+var(milk.bct)
+
+# difference for seasonality
+milk.diff1.bct <- diff(milk.bct,lag=12,1)
+var(milk.diff1.bct)
+par(mfrow = c(1,2))
+acf(milk.diff1.bct, main="")
+pacf(milk.diff1.bct, main="")
+title("Deseasonalized", line = -1, outer=TRUE)
+par(op)
+
+# add difference for trend
+milk.diff2.bct <- diff(milk.diff1.bct,1)
+var(milk.diff2.bct)
+
+par(mfrow = c(1,2))
+acf(milk.diff2.bct, lag.max = 100, main="")
+pacf(milk.diff2.bct, lag.max = 100, main="")
+title("Detrended", line = -1, outer=TRUE)
+par(op)
+
+# check difference for trend again
+milk.diff3.bct <- diff(milk.diff2.bct,1)
+var(milk.diff3.bct)
+
+# box cox transform yule walker model
+fit.bct.yw <- ar(milk.diff2.bct, method="yule-walker")
+fit.bct.yw
+plot(residuals(fit.bct.yw))
+
+shapiro.test(residuals(fit.bct.yw))
+Box.test(residuals(fit.bct.yw), lag=13, type="Box-Pierce", fitdf = 12)
+hist(residuals(fit.bct.yw), breaks = 15)
+
+# Calculate AICc for ARMA models with p and q running from 0 to 5
+aiccs.bct.milk.s <- matrix(NA, nr = 6, nc = 6)
+dimnames(aiccs.bct.milk.s) = list(p=0:5, q=0:5)
+
+for(p in 0:5)
+{
+  for(q in 0:5)
+  {
+    aiccs.bct.milk.s[p+1,q+1] = AICc(arima(milk.diff2.bct, order = c(p,0,q),method = "ML"))
+  }
+}
+aiccs.bct.milk.s
+(aiccs.bct.milk.s==min(aiccs.bct.milk.s))
+
+fit.bct.3.12 <- arima(milk.diff2.bct, order = c(12, 0, 3), 
+                      method = "ML", xreg=1 : length(milk.diff2.bct))
+fit.bct.3.3 <- arima(milk.diff2.bct, order = c(3,0,3), 
+                     method = "ML", xreg=1 : length(milk.diff2.bct))
+
+# aic 15.44
+fit.bct.3.3
+
+qqnorm(residuals(fit.bct.3.3))
+hist(residuals(fit.bct.3.3))
+plot(residuals(fit.bct.3.3))
+shapiro.test(residuals(fit.bct.3.3))
+Box.test(residuals(fit.bct.3.3), lag = 12 , type = "Box-Pierce", fitdf = 4)
+
+par(mfrow = c(1,2))
+acf(milk.diff2.bct, lag.max = 100)
+pacf(milk.diff2.bct, lag.max = 100)
+par(op)
+
+fit.sarima.bct <- arima(milk.bct, order = c(1,0,1), 
+                        seasonal = list(order = c(1,1,1), period = 12), 
+                        method = "ML")
+fit.sarima.bct
+
+summary(fit.sarima.bct)
+
+shapiro.test(residuals(fit.sarima.bct))
+Box.test(residuals(fit.sarima.bct), lag = 13, type="Box-Pierce", fitdf = 4)
+Box.test(residuals(fit.sarima.bct), lag = 13, type="Ljung-Box", fitdf = 4)
+Box.test( ((residuals(fit.sarima.bct))^2), lag=13, type="Ljung-Box", fitdf = 0)
+
+par(mfrow = c(1,2))
+acf(residuals(fit.sarima.bct), lag.max = 36)
+pacf(residuals(fit.sarima.bct), lag.max = 36)
+par(op)
+
+tsdiag(arima(residuals(fit.sarima.bct),order = c(0,0,0)))
+
+par(mfrow = c(1,2))
+qqnorm(residuals(fit.sarima.bct))
+qqline(residuals(fit.sarima.bct))
+
+hist(residuals(fit.sarima.bct), breaks = 15)
+par(op)
+
+# Predict 10 future observations and plot
+pred.bct <- predict(fit.sarima.bct, n.ahead=24)
+
+plot(1:length(milk.ts), milk.ts, main = "Monthly Milk per cow", 
+     ylab = "Milk in pounds per cow", xlab = "Date in Years", 
+     type = "l", xaxt = "null", xlim = c(130,193), ylim = c(750,1050))
+points( (length(milk.ts)+1):(length(milk.ts)+24), ((milk.lambda*pred.bct$pred+1)^(1/milk.lambda)))
+
+lines((length(milk.ts)+1):(length(milk.ts)+24),
+      ((milk.lambda*pred.bct$pred+1)^(1/milk.lambda) + 
+         1.96*(milk.lambda*pred.bct$se+1)^(1/milk.lambda)),lty=2)
+lines((length(milk.ts)+1):(length(milk.ts)+24),
+      ((milk.lambda*pred.bct$pred+1)^(1/milk.lambda) -
+         1.96*(milk.lambda*pred.bct$se+1)^(1/milk.lambda)),lty=2)
+
+```
+
